@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"syscall"
 
 	"github.com/google/subcommands"
 	"github.com/simmonmt/unifi_tool/lib/unifi"
+	"golang.org/x/term"
 )
 
 var (
@@ -17,8 +19,9 @@ var (
 )
 
 type topFlags struct {
-	Username string
-	Site     string
+	Username        string
+	PasswordEnvName string
+	Site            string
 }
 
 func newUsageError(msg string) error {
@@ -26,7 +29,14 @@ func newUsageError(msg string) error {
 }
 
 func readPassword() (string, error) {
-	return "", nil
+	fmt.Print("Password: ")
+	password, err := term.ReadPassword(syscall.Stdin)
+	fmt.Println()
+	if err != nil {
+		return "", err
+	}
+
+	return string(password), nil
 }
 
 func newSiteControllerFromTopFlags(ctx context.Context, tf *topFlags) (*unifi.Controller, error) {
@@ -42,14 +52,26 @@ func newControllerFromTopFlags(ctx context.Context, tf *topFlags) (*unifi.Contro
 		return nil, newUsageError("--username is required")
 	}
 
-	password, err := readPassword()
-	if err != nil {
-		return nil, err
+	var password string
+	if tf.PasswordEnvName != "" {
+		password = os.Getenv(tf.PasswordEnvName)
+		if password == "" {
+			fmt.Println(os.Environ())
+			return nil, fmt.Errorf(
+				"no password found in environment variable %v",
+				tf.PasswordEnvName)
+		}
+	} else {
+		var err error
+		password, err = readPassword()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read password: %w", err)
+		}
 	}
 
 	c := unifi.NewController(tf.Username, tf.Site)
 	if err := c.Login(password); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to login: %w", err)
 	}
 
 	return c, nil
@@ -68,6 +90,7 @@ func main() {
 
 	topFlagSet := flag.NewFlagSet("", flag.ExitOnError)
 	topFlagSet.StringVar(&topFlags.Username, "username", "", "Username for login. Password will be read interactively.")
+	topFlagSet.StringVar(&topFlags.PasswordEnvName, "password_env", "", "Name of the environment variable that contains the password.")
 	topFlagSet.StringVar(&topFlags.Site, "site", "", "Site to use")
 
 	topFlagSet.Parse(os.Args[1:])

@@ -11,6 +11,7 @@ go_library(
     deps = [
         "//lib/unifi",
         "@com_github_google_subcommands//:subcommands",
+        "@org_golang_x_term//:term",
     ],
 )
 

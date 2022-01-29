@@ -15,5 +15,5 @@ func NewController(username, site string) *Controller {
 }
 
 func (c *Controller) Login(password string) error {
-	return fmt.Errorf("unimplemented")
+	return fmt.Errorf("unimplemented pw %v", password)
 }
