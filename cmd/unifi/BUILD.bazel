@@ -1,0 +1,21 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "unifi_lib",
+    srcs = [
+        "sites.go",
+        "unifi.go",
+    ],
+    importpath = "github.com/simmonmt/unifi_tool/cmd/unifi",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//lib/unifi",
+        "@com_github_google_subcommands//:subcommands",
+    ],
+)
+
+go_binary(
+    name = "unifi",
+    embed = [":unifi_lib"],
+    visibility = ["//visibility:public"],
+)
