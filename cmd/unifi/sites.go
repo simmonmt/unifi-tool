@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"os"
+	"text/tabwriter"
 
 	"github.com/google/subcommands"
 )
@@ -15,10 +18,23 @@ func (c *sitesCommand) Usage() string            { return `sites` }
 func (c *sitesCommand) SetFlags(f *flag.FlagSet) {}
 
 func (c *sitesCommand) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
-	_, err := newControllerFromTopFlags(ctx, args[0].(*topFlags))
+	ctrl, err := newControllerFromTopFlags(ctx, args[0].(*topFlags))
 	if err != nil {
 		return handleCommandError(err)
 	}
+
+	sites, err := ctrl.Sites(ctx)
+	if err != nil {
+		return handleCommandError(err)
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
+	fmt.Fprintln(w, "Name\tDescription")
+
+	for _, site := range sites {
+		fmt.Fprintf(w, "%v\t%v\n", site.Name, site.Desc)
+	}
+	w.Flush()
 
 	return subcommands.ExitSuccess
 }

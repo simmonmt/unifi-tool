@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"syscall"
@@ -22,6 +23,7 @@ type topFlags struct {
 	Username        string
 	PasswordEnvName string
 	Site            string
+	Controller      string
 }
 
 func newUsageError(msg string) error {
@@ -48,6 +50,14 @@ func newSiteControllerFromTopFlags(ctx context.Context, tf *topFlags) (*unifi.Co
 }
 
 func newControllerFromTopFlags(ctx context.Context, tf *topFlags) (*unifi.Controller, error) {
+	if tf.Controller == "" {
+		return nil, newUsageError("--controller is required")
+	}
+	url, err := url.Parse(tf.Controller)
+	if err != nil {
+		return nil, newUsageError("bad --controller value")
+	}
+
 	if tf.Username == "" {
 		return nil, newUsageError("--username is required")
 	}
@@ -69,8 +79,8 @@ func newControllerFromTopFlags(ctx context.Context, tf *topFlags) (*unifi.Contro
 		}
 	}
 
-	c := unifi.NewController(tf.Username, tf.Site)
-	if err := c.Login(password); err != nil {
+	c := unifi.NewController(tf.Username, tf.Site, url)
+	if err := c.Login(ctx, password); err != nil {
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
 
@@ -92,6 +102,7 @@ func main() {
 	topFlagSet.StringVar(&topFlags.Username, "username", "", "Username for login. Password will be read interactively.")
 	topFlagSet.StringVar(&topFlags.PasswordEnvName, "password_env", "", "Name of the environment variable that contains the password.")
 	topFlagSet.StringVar(&topFlags.Site, "site", "", "Site to use")
+	topFlagSet.StringVar(&topFlags.Controller, "controller", "", "URL for controller")
 
 	topFlagSet.Parse(os.Args[1:])
 
@@ -101,6 +112,7 @@ func main() {
 	commander.Register(commander.FlagsCommand(), "")
 	commander.Register(commander.CommandsCommand(), "")
 	commander.Register(&sitesCommand{}, "controller operations")
+	commander.Register(&forceProvisionCommand{}, "controller operations")
 
 	ctx := context.Background()
 	os.Exit(int(commander.Execute(ctx, topFlags)))
