@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -38,19 +39,30 @@ func readMACForIP(ip net.IP) (string, error) {
 	return "", fmt.Errorf("no MAC found for %v", ip)
 }
 
+func pingIP(ip net.IP) error {
+	// We have to shell out to /usr/bin/ping because creation of
+	// raw ICMP endpoints requires privileges we don't have.
+	cmd := exec.Command("ping", "-c1", ip.String())
+	return cmd.Run()
+}
+
 func ipToMAC(ip net.IP) (string, error) {
 	if mac, err := readMACForIP(ip); err == nil {
 		return mac, nil
 	}
 
-	// It wasn't there. Ping it.
+	fmt.Println("pinging %v to get MAC address", ip)
+	if err := pingIP(ip); err != nil {
+		return "", fmt.Errorf("ping failed: %w", err)
+	}
 
 	return readMACForIP(ip)
 }
 
 func nameToMAC(name string) (string, error) {
-	if _, err := net.ParseMAC(name); err == nil {
-		return name, nil
+	if hw, err := net.ParseMAC(name); err == nil {
+		// Normalize the MAC we return
+		return hw.String(), nil
 	}
 
 	if ip := net.ParseIP(name); ip != nil {

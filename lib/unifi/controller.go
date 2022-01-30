@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"path"
 	"strings"
 )
 
 var (
 	loginError = fmt.Errorf("not logged in")
+	siteError  = fmt.Errorf("invalid/missing site")
 )
 
 func readWithSize(r io.Reader, maxSize int) ([]byte, error) {
@@ -34,6 +37,17 @@ func readWithSize(r io.Reader, maxSize int) ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("empty read")
+}
+
+func unmarshalBody(r io.Reader, d interface{}) error {
+	buf, err := ioutil.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(buf, d); err != nil {
+		return err
+	}
+	return nil
 }
 
 func decodeControllerError(resp *http.Response) error {
@@ -87,6 +101,21 @@ func NewController(username, site string, baseURL *url.URL) *Controller {
 			Jar: jar,
 		},
 	}
+}
+
+func (c *Controller) siteNetworkAPI(api string) string {
+	return path.Join("/proxy/network/api/s", c.site, api)
+}
+
+func (c *Controller) requireLoginAndSite() error {
+	if !c.loggedIn {
+		return loginError
+	}
+	if c.site == "" {
+		return siteError
+	}
+
+	return nil
 }
 
 func (c *Controller) getCookie(name string) *http.Cookie {
@@ -219,14 +248,115 @@ func (c *Controller) Sites(ctx context.Context) ([]*Site, error) {
 		Data []*Site
 	}
 	resp := &SitesResp{}
-
-	buf, err := ioutil.ReadAll(body)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(buf, resp); err != nil {
+	if err := unmarshalBody(body, resp); err != nil {
 		return nil, err
 	}
 
 	return resp.Data, nil
+}
+
+type DeviceAddr struct {
+	Name string
+	IP   net.IP
+	MAC  net.HardwareAddr
+}
+
+func parseDeviceAddr(name, ip, mac string, da *DeviceAddr) (err error) {
+	da.Name = name
+
+	da.IP = net.ParseIP(ip)
+	if da.IP == nil {
+		return fmt.Errorf("bad IP addr %v", ip)
+	}
+
+	da.MAC, err = net.ParseMAC(mac)
+	if err != nil {
+		return fmt.Errorf("bad MAC addr %v: %w", mac, err)
+	}
+
+	return nil
+}
+
+type Device struct {
+	DeviceAddr
+	ExtraPorts []DeviceAddr
+}
+
+func (c *Controller) Devices(ctx context.Context) ([]*Device, error) {
+	if err := c.requireLoginAndSite(); err != nil {
+		return nil, err
+	}
+
+	body, err := c.sendRequest(ctx, "GET", c.siteNetworkAPI("/stat/device"), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	type Resp struct {
+		Data []struct {
+			Name         string
+			IP           string
+			MAC          string
+			NetworkTable []struct {
+				Name string
+				IP   string
+				MAC  string
+			} `json:"network_table"`
+		}
+	}
+
+	resp := &Resp{}
+	if err := unmarshalBody(body, resp); err != nil {
+		return nil, err
+	}
+
+	out := []*Device{}
+	for _, raw := range resp.Data {
+		dev := &Device{
+			ExtraPorts: make([]DeviceAddr, len(raw.NetworkTable)),
+		}
+
+		if err := parseDeviceAddr(raw.Name, raw.IP, raw.MAC, &dev.DeviceAddr); err != nil {
+			return nil, fmt.Errorf("bad top-level device addr for %v: %w",
+				raw.Name, err)
+		}
+
+		for i, ent := range raw.NetworkTable {
+			port := &dev.ExtraPorts[i]
+			if err := parseDeviceAddr(ent.Name, ent.IP, ent.MAC, port); err != nil {
+				return nil, fmt.Errorf("bad entry %v addr for %v: %w",
+					ent.Name, raw.Name, err)
+			}
+
+		}
+
+		out = append(out, dev)
+	}
+
+	return out, nil
+}
+
+func (c *Controller) ForceProvision(ctx context.Context, mac net.HardwareAddr) error {
+	if err := c.requireLoginAndSite(); err != nil {
+		return err
+	}
+
+	type Cmd struct {
+		Mac string `json:"mac"`
+		Cmd string `json:"cmd"`
+	}
+
+	cmd := &Cmd{
+		Mac: mac.String(),
+		Cmd: "force-provision",
+	}
+
+	body, err := c.sendRequest(ctx, "POST", c.siteNetworkAPI("/cmd/devmgr"), cmd)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+
+	return nil
 }

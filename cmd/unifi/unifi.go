@@ -111,8 +111,10 @@ func main() {
 	commander.Register(commander.HelpCommand(), "")
 	commander.Register(commander.FlagsCommand(), "")
 	commander.Register(commander.CommandsCommand(), "")
-	commander.Register(&sitesCommand{}, "controller operations")
+
 	commander.Register(&forceProvisionCommand{}, "controller operations")
+	commander.Register(&listDevicesCommand{}, "controller operations")
+	commander.Register(&sitesCommand{}, "controller operations")
 
 	ctx := context.Background()
 	os.Exit(int(commander.Execute(ctx, topFlags)))
